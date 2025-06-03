@@ -1,2 +1,5 @@
 *.pyc
 *.out*
+wandb/*
+checkpoint/*
+output/*
