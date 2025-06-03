@@ -27,6 +27,17 @@ pip install triton==3.0.0
 ACCELERATE_LOG_LEVEL=info accelerate launch --config_file deepspeed_zero3.yaml train_mamba2/train_distill_mamba2.py llama3.2_3B/distilled_llama2.yaml
 ```
 
+Or 
+
+## Downloading our distilled draft model
+
+Our draft model can be found on [huggingface](https://huggingface.co/ycwu97/mamba2-distilled-small)
+To download and put it in the correct location:
+```
+cd checkpoint
+git clone https://huggingface.co/ycwu97/mamba2-distilled-small
+```
+
 ## Inference 
 
 The inference entry point is located at `benchmarks/benchmark_generation_mamba_simple.py`. It provides a lot of options:
