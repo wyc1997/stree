@@ -12,7 +12,7 @@ from transformers import AutoTokenizer, AutoModelForCausalLM
 
 import os, sys
 sys.path.insert(0, os.getcwd())
-from mamba_ssm.models.mixer_seq_simple import MambaLMHeadModel, MambaSelfDraftLMHeadModel
+from mamba_ssm.models.mixer_seq_simple import MambaLMHeadModel
 from mamba_ssm.models.speculative_decoding_mamba import MambaLMHeadSpecDecModel
 from mamba_ssm.utils.generation_utils import InferenceParams
 
@@ -30,7 +30,6 @@ parser.add_argument("--topp", type=float, default=1.0)
 parser.add_argument("--minp", type=float, default=0.0)
 parser.add_argument("--repetition-penalty", type=float, default=1.0)
 parser.add_argument("--batch", type=int, default=1)
-parser.add_argument("--model_layer_split", type=int, default=None)
 parser.add_argument("--spec_Ngram", action='store_true')
 parser.add_argument("--cg", action="store_true")
 parser.add_argument("--use_Nstep_kernel", action="store_true")
@@ -55,9 +54,7 @@ if __name__ == "__main__":
     is_MIL = (args.model_name.startswith("JunxiongWang/"))
     if is_mamba:
         tokenizer = AutoTokenizer.from_pretrained("EleutherAI/gpt-neox-20b")
-        if args.model_layer_split is not None:
-            model = MambaSelfDraftLMHeadModel.from_pretrained(args.model_name, device=device, dtype=dtype, self_draft_layer=args.model_layer_split, drafting_topk=10)
-        elif args.spec_Ngram:
+        if args.spec_Ngram:
             model = MambaLMHeadSpecDecModel.from_pretrained(args.model_name, device=device, dtype=dtype,
                                                             jit_state_copy=args.jit_state_copy,
                                                             use_Nstep_kernel=args.use_Nstep_kernel,
@@ -125,12 +122,15 @@ if __name__ == "__main__":
         input_seqlen = max(length_list)
         input_id_list = [F.pad(x, (input_seqlen - x.shape[1], 0)) for x in input_id_list]
         mask_list = [F.pad(x, (input_seqlen - x.shape[1], 0)) for x in mask_list]
-        causal_attn_mask_list = [torch.ones((1, s, s), device=device).tril(diagonal=0) for s in length_list]
-        causal_attn_mask_list = [F.pad(x, (0, input_seqlen-x.shape[1], 0, input_seqlen-x.shape[1])) for x in causal_attn_mask_list]
-        # tokens = tokenizer(args.prompt, return_tensors="pt")
         input_ids = torch.cat(input_id_list, dim=0)
-        # attn_mask = torch.cat(mask_list, dim=0)
-        attn_mask = torch.cat(causal_attn_mask_list, dim=0)
+        attn_mask = torch.cat(mask_list, dim=0)
+        mask_type = "padding"
+        if is_MIL:
+            causal_attn_mask_list = [torch.ones((1, s, s), device=device).tril(diagonal=0) for s in length_list]
+            causal_attn_mask_list = [F.pad(x, (0, input_seqlen-x.shape[1], 0, input_seqlen-x.shape[1])) for x in causal_attn_mask_list]
+            attn_mask = torch.cat(causal_attn_mask_list, dim=0)
+            mask_type = "attention"
+        # tokens = tokenizer(args.prompt, return_tensors="pt")
     max_length = input_ids.shape[1] + args.genlen
     if is_mamba or is_MIL:
         fn = lambda: model.generate(
@@ -148,7 +148,7 @@ if __name__ == "__main__":
             top_p=args.topp,
             min_p=args.minp,
             repetition_penalty=args.repetition_penalty,
-            mask_type="attention"
+            mask_type=mask_type
         )
     else:
         fn = lambda: model.generate(
@@ -227,13 +227,18 @@ if __name__ == "__main__":
             args.npad = 0 if args.npad is None else args.npad
             inference_params = InferenceParams(max_seqlen=max_length+args.npad+1, max_batch_size=1)
             inference_params.ndraft = 1
-            inference_params.mask_type = "attention"
+            if is_MIL:
+                inference_params.mask_type = "attention"
+                mask = torch.ones((1, out_seq.shape[1], out_seq.shape[1]), device=device).tril(diagonal=0)
+            else:
+                inference_params.mask_type = "padding"
+                mask = torch.ones_like(out_seq)
             inference_params.reset(max_length+args.npad+1, 1)
             logits = model(
                 out_seq,
                 position_ids=torch.arange(out_seq.shape[1], device=out_seq.device).unsqueeze(0),
                 inference_params=inference_params,
-                mask=torch.ones((1, out_seq.shape[1], out_seq.shape[1]), device=device).tril(diagonal=0),
+                mask=mask,
                 num_last_tokens=0,
             ).logits.squeeze(dim=1)
             probs = torch.softmax(logits, dim=-1)
