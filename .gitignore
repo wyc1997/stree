@@ -3,3 +3,4 @@
 wandb/*
 checkpoint/*
 output/*
+**/model_answer/**

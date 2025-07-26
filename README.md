@@ -17,6 +17,8 @@ pip install causal_conv1d==1.4
 pip install flash-attn==2.6.3
 pip install transformers==4.49.0
 pip install triton==3.0.0
+# for evaluation
+pip install shortuuid fastchat psutil accelerate
 ```
 
 # Usage 
